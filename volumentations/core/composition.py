@@ -14,7 +14,7 @@ class Compose:
         return res
 
     def __call__(self, force_apply=False, **data):
-        need_to_run = force_apply or random.random < self.p
+        need_to_run = force_apply or random.random() < self.p
         transforms = self.transforms if need_to_run else self.get_always_apply_transforms()
         
         for tr in transforms:

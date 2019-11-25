@@ -1,7 +1,7 @@
 import random
 
 class Transform:
-    def __init__(self, p=0.5, always_apply=False):
+    def __init__(self, always_apply=False, p=0.5):
         assert 0 <= p <= 1
         self.p = p
         self.always_apply = always_apply
