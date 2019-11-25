@@ -1,3 +1,4 @@
+import cv2
 import random
 import numpy as np
 from volumentations.core import Compose, Transform, DualTransform
@@ -105,6 +106,12 @@ class Normalize(Transform):
 
     def apply(self, img):
         return F.normalize(img)
+
+
+class Contiguous(DualTransform):
+
+    def apply(self, img):
+        return np.ascontiguousarray(img)
 
         
 class Transpose(DualTransform):
@@ -280,6 +287,7 @@ class ElasticTransform(DualTransform):
         self,
         alpha=1,
         sigma=50,
+        alpha_affine=1,
         interpolation=1,
         border_mode='reflect',
         approximate=False,
@@ -289,30 +297,35 @@ class ElasticTransform(DualTransform):
         super().__init__(always_apply, p)
         self.alpha = alpha
         self.sigma = sigma
+        self.alpha_affine = alpha_affine
         self.interpolation = interpolation
         self.border_mode = border_mode
         self.approximate = approximate
 
     def apply(self, img, random_state=None):
-        return F.elastic_transform(
+        return F.elastic_transform_2(
             img,
             self.alpha,
             self.sigma,
-            self.interpolation,
-            self.border_mode,
-            self.approximate,
-            np.random.RandomState(random_state),
+            self.alpha_affine,
+            interpolation=cv2.INTER_LINEAR,
+            border_mode=cv2.BORDER_REFLECT_101,
+            value=None,
+            random_state=random_state,
+            approximate=False,
         )
 
     def apply_to_mask(self, img, random_state=None):
-        return F.elastic_transform(
+        return F.elastic_transform_2(
             img,
             self.alpha,
             self.sigma,
-	    0,
-            self.border_mode,
-            self.approximate,
-            np.random.RandomState(random_state),
+            self.alpha_affine,
+            interpolation=cv2.INTER_NEAREST,
+            border_mode=cv2.BORDER_REFLECT_101,
+            value=None,
+            random_state=random_state,
+            approximate=False,
         )
 
     def get_params(self, **data):

@@ -139,26 +139,32 @@ def gamma_transform(img, gamma, eps=1e-7):
     img = (img - mn)/(rng + eps)
     return np.power(img, gamma)
     
-def elastic_transform(image, alpha, sigma, interpolation=1, border_mode='reflect', approximate=False, random_state=None):
-    """
-    Not working, deadly slow, don't use.
-    """
+def elastic_transform(image, alpha, sigma, alpha_affine, interpolation=1, border_mode='reflect', approximate=False, random_state=None):
+    '''
+    apply 2D elastic_transform on each x-y plane
+    '''
     if random_state is None:
         random_state = np.random.RandomState(None)
 
-    shape = image.shape
-    shape_size = shape[:3]
+    shape = image.shape # [H, W, D, C]
+    shape_size = shape[:2]
     height, width, depth = shape[:3]
 
-    """
     # Random affine
     center_square = np.float32(shape_size) // 2
     square_size = min(shape_size) // 3
     pts1 = np.float32([center_square + square_size, [center_square[0]+square_size, center_square[1]-square_size], center_square - square_size])
     pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
     M = cv2.getAffineTransform(pts1, pts2)
-    image = cv2.warpAffine(image, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
-    """
+    
+    res = np.zeros_like(image)
+    for d in range(depth):
+        tmp = image[:, :, d] # [H, W, C]
+        tmp = cv2.warpAffine(tmp, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
+        res[:, :, d] = tmp
+    image = res
+
+    # Elastic warp
     if approximate:
         # Approximate computation smooth displacement map with a large enough kernel.
         # On large images (512+) this is approximately 2X times faster
@@ -170,13 +176,91 @@ def elastic_transform(image, alpha, sigma, interpolation=1, border_mode='reflect
         cv2.GaussianBlur(dy, (17, 17), sigma, dst=dy)
         dy *= alpha
 
-        dz = np.zeros_like(dx)
     else:
         dx = np.float32(gaussian_filter((random_state.rand(height, width, 1) * 2 - 1), sigma) * alpha)
         dy = np.float32(gaussian_filter((random_state.rand(height, width, 1) * 2 - 1), sigma) * alpha)
-        dz = np.zeros_like(dx)
 
     x, y, z = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]), np.arange(shape[2]))
-    indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))
+    indices = [np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))]
+    
+    image = sci.map_coordinates(image, indices, order=interpolation, mode=border_mode).reshape(shape)
+    return image
 
-    return sci.map_coordinates(image, indices, order=interpolation, mode=border_mode).reshape(shape)
+def elastic_transform_2(
+    img,
+    alpha,
+    sigma,
+    alpha_affine,
+    interpolation=cv2.INTER_LINEAR,
+    border_mode=cv2.BORDER_REFLECT_101,
+    value=None,
+    random_state=42,
+    approximate=False,
+):
+    """Elastic deformation of images as described in [Simard2003]_ (with modifications).
+    Based on https://gist.github.com/erniejunior/601cdf56d2b424757de5
+
+    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+         Convolutional Neural Networks applied to Visual Document Analysis", in
+         Proc. of the International Conference on Document Analysis and
+         Recognition, 2003.
+    """
+    random_state = np.random.RandomState(random_state)
+
+    height, width, depth = img.shape[:3]
+
+    # Random affine
+    center_square = np.float32((height, width)) // 2
+    square_size = min((height, width)) // 3
+    alpha = float(alpha)
+    sigma = float(sigma)
+    alpha_affine = float(alpha_affine)
+
+    pts1 = np.float32(
+        [
+            center_square + square_size,
+            [center_square[0] + square_size, center_square[1] - square_size],
+            center_square - square_size,
+        ]
+    )
+    pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
+    matrix = cv2.getAffineTransform(pts1, pts2)
+
+    # pseoudo 2D
+    res = np.zeros_like(img)
+    for d in range(depth):
+        tmp = img[:, :, d] # [H, W, C]
+        tmp = cv2.warpAffine(tmp, M=matrix, dsize=(width, height), flags=interpolation, borderMode=border_mode, borderValue=value)
+        res[:, :, d] = tmp
+    img = res
+
+
+    if approximate:
+        # Approximate computation smooth displacement map with a large enough kernel.
+        # On large images (512+) this is approximately 2X times faster
+        dx = random_state.rand(height, width).astype(np.float32) * 2 - 1
+        cv2.GaussianBlur(dx, (17, 17), sigma, dst=dx)
+        dx *= alpha
+
+        dy = random_state.rand(height, width).astype(np.float32) * 2 - 1
+        cv2.GaussianBlur(dy, (17, 17), sigma, dst=dy)
+        dy *= alpha
+    else:
+        dx = np.float32(gaussian_filter((random_state.rand(height, width) * 2 - 1), sigma) * alpha)
+        dy = np.float32(gaussian_filter((random_state.rand(height, width) * 2 - 1), sigma) * alpha)
+
+    x, y = np.meshgrid(np.arange(width), np.arange(height))
+
+    map_x = np.float32(x + dx)
+    map_y = np.float32(y + dy)
+
+    # pseoudo 2D
+    res = np.zeros_like(img)
+    for d in range(depth):
+        tmp = img[:, :, d] # [H, W, C]
+        tmp = cv2.remap(tmp, map1=map_x, map2=map_y, interpolation=interpolation, borderMode=border_mode, borderValue=value)
+        res[:, :, d] = tmp
+    img = res
+
+    return img
+
