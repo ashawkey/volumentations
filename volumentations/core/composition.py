@@ -1,5 +1,5 @@
 import random
-from volumentations.augmentations import transforms as T
+from ..augmentations import transforms as T
 
 class Compose:
     def __init__(self, transforms, p=1.0, targets=[['image'],['mask']]):

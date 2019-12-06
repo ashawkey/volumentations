@@ -25,8 +25,7 @@ def view_batch(imgs, lbls):
     plt.show()
 
 
-from volumentations import Compose
-from volumentations.augmentations import *
+from volumentations import *
 
 patch_size = (160, 160, 64)
 

@@ -1,8 +1,9 @@
 import cv2
 import random
 import numpy as np
-from volumentations.core import Compose, Transform, DualTransform
-import volumentations.augmentations.functionals as F
+from ..core.composition import Compose
+from ..core.transforms_interface import Transform, DualTransform
+from . import functionals as F
 
 class PadIfNeeded(DualTransform):
     def __init__(self, shape, border_mode='constant', value=0, mask_value=0, always_apply=False, p=1):
