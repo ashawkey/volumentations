@@ -220,6 +220,7 @@ def elastic_transform_pseudo2D(img, alpha, sigma, alpha_affine, interpolation=cv
 
 """
 Later are coordinates-based 3D rotation and elastic transforms.
+reference: https://github.com/MIC-DKFZ/batchgenerators
 """
 
 def elastic_transform(img, sigmas, alphas, interpolation=1, border_mode='constant', value=0, random_state=42):
@@ -322,6 +323,22 @@ def rot_z(angle):
                            [0, 0, 1]])
     return rotation_z
 
+
+def rescale_warp(img, scale, interpolation=1):
+    """
+    img: [H, W, D(, C)]
+    """
+    coords = generate_coords(img.shape[:3])
+    coords = scale_coords(coords, scale)
+    coords = recenter_coords(coords)
+    if len(img.shape) == 4:
+        num_channels = img.shape[3]
+        res = []
+        for channel in range(num_channels):
+            res.append(map_coordinates(img[:,:,:,channel], coords, order=interpolation, mode=border_mode, cval=value))
+        return np.stack(res, -1)
+    else:
+        return map_coordinates(img, coords, order=interpolation, mode=border_mode, cval=value)
 
 def scale_coords(coords, scale):
     if isinstance(scale, (tuple, list, np.ndarray)):

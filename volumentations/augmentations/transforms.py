@@ -63,6 +63,24 @@ class RandomScale(DualTransform):
     def apply_to_mask(self, mask, scale):
         return F.rescale(mask, scale, interpolation=0)
 
+class RandomScale2(DualTransform):
+    """
+    TODO: compare speeds with version 1.
+    """
+    def __init__(self, scale_limit=[0.9, 1.1], interpolation=1, always_apply=False, p=0.5):
+        super().__init__(always_apply, p)
+        self.scale_limit = scale_limit
+        self.interpolation = interpolation
+
+    def get_params(self, **data):
+        return {"scale": random.uniform(self.scale_limit[0], self.scale_limit[1])}
+
+    def apply(self, img, scale):
+        return F.rescale_warp(img, scale, interpolation=self.interpolation)
+
+    def apply_to_mask(self, mask, scale):
+        return F.rescale_warp(mask, scale, interpolation=0)
+
 
 class RotatePseudo2D(DualTransform):
 
