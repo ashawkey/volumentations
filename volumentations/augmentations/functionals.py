@@ -3,6 +3,7 @@ import skimage.transform as skt
 import scipy.ndimage.interpolation as sci
 import cv2
 from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import map_coordinates
 from warnings import warn
 
 """
@@ -20,10 +21,13 @@ order = 2: Bi-Quadratic
 order = 3: Bi-Cubic
 order = 4: Bi-Quartic
 order = 5: Bi-Quintic
+
+Interpolation behaves strangely when input of type int.
+** Be sure to change volume and mask data type to float !!! **
 """
 
 
-def rotate(img, angle, axes=(0,1), reshape=False, interpolation=1, border_mode='constant', value=0):
+def rotate2d(img, angle, axes=(0,1), reshape=False, interpolation=1, border_mode='constant', value=0):
     return sci.rotate(img, angle, axes, reshape=reshape, order=interpolation, mode=border_mode, cval=value)
 
 
@@ -83,8 +87,11 @@ def random_crop(img, crop_height, crop_width, crop_depth, h_start, w_start, d_st
     return img
 
 
-def normalize(img):
-    img = img.astype(np.float32)
+def normalize(img, range_norm=True):
+    if range_norm:
+        mn = img.min()
+        mx = img.max()
+        img = (img - mn) / (mx - mn)
     mean = img.mean()
     std = img.std()
     denominator = np.reciprocal(std)
@@ -119,7 +126,7 @@ def pad(image, new_shape, border_mode="constant", value=0):
 def gaussian_noise(img, var, mean):
     return img + np.random.normal(mean, var, img.shape)
 
-def resize(img, new_shape, interpolation=3):
+def resize(img, new_shape, interpolation=1):
     """
     img: [H, W, D, C] or [H, W, D]
     new_shape: [H, W, D]
@@ -132,6 +139,10 @@ def rescale(img, scale, interpolation=1):
     scale: scalar float
     """
     return skt.rescale(img, scale, order=interpolation, mode='constant', cval=0, clip=True, multichannel=True, anti_aliasing=False)
+    """
+    shape = [int(scale * i) for i in img.shape[:3]]
+    return resize(img, shape, interpolation)
+    """
 
 def gamma_transform(img, gamma, eps=1e-7):
     mn = img.min()
@@ -139,64 +150,7 @@ def gamma_transform(img, gamma, eps=1e-7):
     img = (img - mn)/(rng + eps)
     return np.power(img, gamma)
     
-def elastic_transform(image, alpha, sigma, alpha_affine, interpolation=1, border_mode='reflect', approximate=False, random_state=None):
-    '''
-    apply 2D elastic_transform on each x-y plane
-    '''
-    if random_state is None:
-        random_state = np.random.RandomState(None)
-
-    shape = image.shape # [H, W, D, C]
-    shape_size = shape[:2]
-    height, width, depth = shape[:3]
-
-    # Random affine
-    center_square = np.float32(shape_size) // 2
-    square_size = min(shape_size) // 3
-    pts1 = np.float32([center_square + square_size, [center_square[0]+square_size, center_square[1]-square_size], center_square - square_size])
-    pts2 = pts1 + random_state.uniform(-alpha_affine, alpha_affine, size=pts1.shape).astype(np.float32)
-    M = cv2.getAffineTransform(pts1, pts2)
-    
-    res = np.zeros_like(image)
-    for d in range(depth):
-        tmp = image[:, :, d] # [H, W, C]
-        tmp = cv2.warpAffine(tmp, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
-        res[:, :, d] = tmp
-    image = res
-
-    # Elastic warp
-    if approximate:
-        # Approximate computation smooth displacement map with a large enough kernel.
-        # On large images (512+) this is approximately 2X times faster
-        dx = random_state.rand(height, width).astype(np.float32) * 2 - 1
-        cv2.GaussianBlur(dx, (17, 17), sigma, dst=dx)
-        dx *= alpha
-
-        dy = random_state.rand(height, width).astype(np.float32) * 2 - 1
-        cv2.GaussianBlur(dy, (17, 17), sigma, dst=dy)
-        dy *= alpha
-
-    else:
-        dx = np.float32(gaussian_filter((random_state.rand(height, width, 1) * 2 - 1), sigma) * alpha)
-        dy = np.float32(gaussian_filter((random_state.rand(height, width, 1) * 2 - 1), sigma) * alpha)
-
-    x, y, z = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]), np.arange(shape[2]))
-    indices = [np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))]
-    
-    image = sci.map_coordinates(image, indices, order=interpolation, mode=border_mode).reshape(shape)
-    return image
-
-def elastic_transform_2(
-    img,
-    alpha,
-    sigma,
-    alpha_affine,
-    interpolation=cv2.INTER_LINEAR,
-    border_mode=cv2.BORDER_REFLECT_101,
-    value=None,
-    random_state=42,
-    approximate=False,
-):
+def elastic_transform_pseudo2D(img, alpha, sigma, alpha_affine, interpolation=cv2.INTER_LINEAR, border_mode=cv2.BORDER_REFLECT_101, value=None, random_state=42, approximate=False):
     """Elastic deformation of images as described in [Simard2003]_ (with modifications).
     Based on https://gist.github.com/erniejunior/601cdf56d2b424757de5
 
@@ -263,4 +217,118 @@ def elastic_transform_2(
     img = res
 
     return img
+
+"""
+Later are coordinates-based 3D rotation and elastic transforms.
+"""
+
+def elastic_transform(img, sigmas, alphas, interpolation=1, border_mode='constant', value=0, random_state=42):
+    """
+    img: [H, W, D(, C)]
+    """
+    coords = generate_coords(img.shape[:3])
+    coords = elastic_deform_coords(coords, sigmas, alphas, random_state)
+    coords = recenter_coords(coords)
+    if len(img.shape) == 4:
+        num_channels = img.shape[3]
+        res = []
+        for channel in range(num_channels):
+            res.append(map_coordinates(img[:,:,:,channel], coords, order=interpolation, mode=border_mode, cval=value))
+        return np.stack(res, -1)
+    else:
+        return map_coordinates(img, coords, order=interpolation, mode=border_mode, cval=value)
+
+
+def generate_coords(shape):
+    """
+    coords: [n_dim=3, H, W, D]
+    """
+    tmp = tuple([np.arange(i) for i in shape])
+    coords = np.array(np.meshgrid(*tmp, indexing='ij')).astype(float)
+    for d in range(len(shape)):
+        coords[d] -= ((np.array(shape).astype(float) - 1) / 2)[d]
+    return coords
+
+
+def elastic_deform_coords(coords, sigmas, alphas, random_state):
+    random_state = np.random.RandomState(random_state)
+    n_dim = coords.shape[0]
+    if not isinstance(alphas, (tuple, list)):
+        alphas = [alphas] * n_dim
+    if not isinstance(sigmas, (tuple, list)):
+        sigmas = [sigmas] * n_dim
+    offsets = []
+    for d in range(n_dim):
+        offset = gaussian_filter((random_state.rand(*coords.shape[1:]) * 2 - 1), sigmas, mode="constant", cval=0)
+        mx = np.max(np.abs(offset))
+        offset = alphas[d] * offset / mx
+        offsets.append(offset)
+    offsets = np.array(offsets)
+    coords += offsets
+    return coords
+
+def recenter_coords(coords):
+    n_dim = coords.shape[0]
+    mean = coords.mean(axis=tuple(range(1, len(coords.shape))), keepdims=True)
+    coords -= mean
+    for d in range(n_dim):
+        ctr = int(np.round(coords.shape[d+1]/2))
+        coords[d] += ctr
+    return coords
+
+def rotate3d(img, x, y, z, interpolation=1, border_mode='constant', value=0):
+    """
+    img: [H, W, D(, C)]
+    x, y, z: angle in degree.
+    """
+    x, y, z = [np.pi*i/180 for i in [x, y, z]]
+    coords = generate_coords(img.shape[:3])
+    coords = rotate_coords(coords, x, y, z)
+    coords = recenter_coords(coords)
+    if len(img.shape) == 4:
+        num_channels = img.shape[3]
+        res = []
+        for channel in range(num_channels):
+            res.append(map_coordinates(img[:,:,:,channel], coords, order=interpolation, mode=border_mode, cval=value))
+        return np.stack(res, -1)
+    else:
+        return map_coordinates(img, coords, order=interpolation, mode=border_mode, cval=value)
+
+def rotate_coords(coords, angle_x, angle_y, angle_z):
+    rot_matrix = np.identity(len(coords))
+    rot_matrix = rot_matrix @ rot_x(angle_x)
+    rot_matrix = rot_matrix @ rot_y(angle_y)
+    rot_matrix = rot_matrix @ rot_z(angle_z)
+    coords = np.dot(coords.reshape(len(coords), -1).transpose(), rot_matrix).transpose().reshape(coords.shape)
+    return coords
+
+def rot_x(angle):
+    rotation_x = np.array([[1, 0, 0],
+                           [0, np.cos(angle), -np.sin(angle)],
+                           [0, np.sin(angle), np.cos(angle)]])
+    return rotation_x
+
+
+def rot_y(angle):
+    rotation_y = np.array([[np.cos(angle), 0, np.sin(angle)],
+                           [0, 1, 0],
+                           [-np.sin(angle), 0, np.cos(angle)]])
+    return rotation_y
+
+
+def rot_z(angle):
+    rotation_z = np.array([[np.cos(angle), -np.sin(angle), 0],
+                           [np.sin(angle), np.cos(angle), 0],
+                           [0, 0, 1]])
+    return rotation_z
+
+
+def scale_coords(coords, scale):
+    if isinstance(scale, (tuple, list, np.ndarray)):
+        assert len(scale) == len(coords)
+        for i in range(len(scale)):
+            coords[i] *= scale[i]
+    else:
+        coords *= scale
+    return coords
 

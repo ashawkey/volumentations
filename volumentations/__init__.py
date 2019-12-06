@@ -1,2 +1,2 @@
-from volumentations.augmentations import transforms
-from volumentations.augmentations import functionals
+from volumentations.augmentations import *
+from volumentations.core import *

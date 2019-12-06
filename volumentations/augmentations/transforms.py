@@ -18,6 +18,7 @@ class PadIfNeeded(DualTransform):
     def apply_to_mask(self, mask):
         return F.pad(mask, self.shape, self.border_mode, self.mask_value)
 
+
 class GaussianNoise(Transform):
     def __init__(self, var_limit=(0, 0.1), mean=0, always_apply=False, p=0.5):
         super().__init__(always_apply, p)
@@ -29,6 +30,7 @@ class GaussianNoise(Transform):
 
     def get_params(self, **data):
         return {'var': random.uniform(*self.var_limit)}
+
 
 class Resize(DualTransform):
 
@@ -42,6 +44,7 @@ class Resize(DualTransform):
     
     def apply_to_mask(self, mask):
         return F.resize(mask, new_shape=self.shape, interpolation=0)
+
 
 class RandomScale(DualTransform):
 
@@ -59,7 +62,8 @@ class RandomScale(DualTransform):
     def apply_to_mask(self, mask, scale):
         return F.rescale(mask, scale, interpolation=0)
 
-class Rotate(DualTransform):
+
+class RotatePseudo2D(DualTransform):
 
     def __init__(self, axes=(0,1), limit=(-90, 90), interpolation=1, border_mode='constant', value=0, mask_value=0, always_apply=False, p=0.5):
         super().__init__(always_apply, p)
@@ -71,13 +75,14 @@ class Rotate(DualTransform):
         self.mask_value = mask_value
 
     def apply(self, img, angle):
-        return F.rotate(img, angle, axes=self.axes, reshape=False, interpolation=self.interpolation, border_mode=self.border_mode, value=self.value)
+        return F.rotate2d(img, angle, axes=self.axes, reshape=False, interpolation=self.interpolation, border_mode=self.border_mode, value=self.value)
 
     def apply_to_mask(self, mask, angle):
-        return F.rotate(mask, angle, axes=self.axes, reshape=False, interpolation=0, border_mode=self.border_mode, value=self.mask_value)
+        return F.rotate2d(mask, angle, axes=self.axes, reshape=False, interpolation=0, border_mode=self.border_mode, value=self.mask_value)
 
     def get_params(self, **data):
         return {"angle": random.uniform(self.limit[0], self.limit[1])}
+
 
 class RandomRotate90(DualTransform):
 
@@ -103,9 +108,18 @@ class Flip(DualTransform):
 
     
 class Normalize(Transform):
+    def __init__(self, range_norm=True, always_apply=True, p=1.0):
+        super().__init__(always_apply, p)
+        self.range_norm = range_norm
 
     def apply(self, img):
-        return F.normalize(img)
+        return F.normalize(img, range_norm=self.range_norm)
+
+
+class Float(DualTransform):
+
+    def apply(self, img):
+        return img.astype(np.float32)
 
 
 class Contiguous(DualTransform):
@@ -122,6 +136,7 @@ class Transpose(DualTransform):
 
     def apply(self, img):
         return np.transpose(img, self.axes)
+
 
 class CenterCrop(DualTransform):
 
@@ -155,7 +170,6 @@ class RandomResizedCrop(DualTransform):
 
     def get_params(self, **data):
         scale = random.uniform(self.scale_limit[0], self.scale_limit[1])
-        print("scale", scale)
         scaled_shape = [int(scale * i) for i in self.shape]
         return {
             "scale": scale,
@@ -165,6 +179,7 @@ class RandomResizedCrop(DualTransform):
             "d_start": random.random(),
             }
     
+
 class RandomCrop(DualTransform):
 
     def __init__(self, shape, always_apply=False, p=1.0):
@@ -181,6 +196,7 @@ class RandomCrop(DualTransform):
             "d_start": random.random(),
             }
     
+
 class CropNonEmptyMaskIfExists(DualTransform):
 
     def __init__(self, shape, always_apply=False, p=1.0):
@@ -219,6 +235,7 @@ class CropNonEmptyMaskIfExists(DualTransform):
             "y_min": y_min, "y_max": y_max,
             "z_min": z_min, "z_max": z_max,
             }
+
 
 class ResizedCropNonEmptyMaskIfExists(DualTransform):
 
@@ -270,7 +287,7 @@ class ResizedCropNonEmptyMaskIfExists(DualTransform):
 
 class RandomGamma(Transform):
 
-    def __init__(self, gamma_limit=(0.8, 1.2), eps=1e-7, always_apply=False, p=0.5):
+    def __init__(self, gamma_limit=(0.7, 1.5), eps=1e-7, always_apply=False, p=0.5):
         super().__init__(always_apply, p)
         self.gamma_limit = gamma_limit
         self.eps = eps
@@ -281,53 +298,76 @@ class RandomGamma(Transform):
     def get_params(self, **data):
         return {"gamma": random.uniform(self.gamma_limit[0], self.gamma_limit[1])}
 
-class ElasticTransform(DualTransform):
 
-    def __init__(
-        self,
-        alpha=1,
-        sigma=50,
-        alpha_affine=1,
-        interpolation=1,
-        border_mode='reflect',
-        approximate=False,
-        always_apply=False,
-        p=0.5,
-    ):
+class ElasticTransformPseudo2D(DualTransform):
+
+    def __init__(self, alpha=1000, sigma=50, alpha_affine=1, approximate=False, always_apply=False, p=0.5):
         super().__init__(always_apply, p)
         self.alpha = alpha
         self.sigma = sigma
         self.alpha_affine = alpha_affine
-        self.interpolation = interpolation
-        self.border_mode = border_mode
         self.approximate = approximate
 
     def apply(self, img, random_state=None):
-        return F.elastic_transform_2(
-            img,
-            self.alpha,
-            self.sigma,
-            self.alpha_affine,
-            interpolation=cv2.INTER_LINEAR,
-            border_mode=cv2.BORDER_REFLECT_101,
-            value=None,
-            random_state=random_state,
-            approximate=False,
-        )
+        return F.elastic_transform_pseudo2D(img, self.alpha, self.sigma, self.alpha_affine, interpolation=cv2.INTER_LINEAR, border_mode=cv2.BORDER_REFLECT_101, value=None, random_state=random_state, approximate=False)
 
     def apply_to_mask(self, img, random_state=None):
-        return F.elastic_transform_2(
-            img,
-            self.alpha,
-            self.sigma,
-            self.alpha_affine,
-            interpolation=cv2.INTER_NEAREST,
-            border_mode=cv2.BORDER_REFLECT_101,
-            value=None,
-            random_state=random_state,
-            approximate=False,
-        )
+        return F.elastic_transform_pseudo2D(img, self.alpha, self.sigma, self.alpha_affine, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_REFLECT_101, value=None, random_state=random_state, approximate=False)
 
     def get_params(self, **data):
         return {"random_state": random.randint(0, 10000)}
 
+
+class ElasticTransform(DualTransform):
+
+    def __init__(self, deformation_limits=(0, 0.25), interpolation=1, border_mode='constant', value=0, mask_value=0, always_apply=False, p=0.5):
+        super().__init__(always_apply, p)
+        self.deformation_limits = deformation_limits
+        self.interpolation = interpolation
+        self.border_mode = border_mode
+        self.value = value
+        self.mask_value = mask_value
+
+    def apply(self, img, sigmas, alphas, random_state=None):
+        return F.elastic_transform(img, sigmas, alphas, interpolation=self.interpolation, random_state=random_state, border_mode=self.border_mode, value=self.value)
+
+    def apply_to_mask(self, img, sigmas, alphas, random_state=None):
+        return F.elastic_transform(img, sigmas, alphas, interpolation=0, random_state=random_state, border_mode=self.border_mode, value=self.mask_value)
+
+    def get_params(self, **data):
+        image = data["image"] # [H, W, D]
+        random_state = random.randint(0, 10000)
+        deformation = random.uniform(*self.deformation_limits)
+        sigmas = [deformation * x for x in image.shape[:3]]
+        alphas = [random.uniform(x/8, x/2) for x in sigmas]
+        return {
+                    "random_state": random_state,
+                    "sigmas": sigmas,
+                    "alphas": alphas,
+                }
+
+
+class Rotate(DualTransform):
+
+    def __init__(self, x_limit=(-15,15), y_limit=(-15,15), z_limit=(-15,15), interpolation=1, border_mode='constant', value=0, mask_value=0, always_apply=False, p=0.5):
+        super().__init__(always_apply, p)
+        self.x_limit = x_limit
+        self.y_limit = y_limit
+        self.z_limit = z_limit
+        self.interpolation = interpolation
+        self.border_mode = border_mode
+        self.value = value
+        self.mask_value = mask_value
+
+    def apply(self, img, x, y, z):
+        return F.rotate3d(img, x, y, z, interpolation=self.interpolation, border_mode=self.border_mode, value=self.value)
+
+    def apply_to_mask(self, mask, x, y, z):
+        return F.rotate3d(mask, x, y, z, interpolation=0, border_mode=self.border_mode, value=self.mask_value)
+
+    def get_params(self, **data):
+        return {
+                    "x": random.uniform(self.x_limit[0], self.x_limit[1]),
+                    "y": random.uniform(self.y_limit[0], self.y_limit[1]),
+                    "z": random.uniform(self.z_limit[0], self.z_limit[1]),
+                }
