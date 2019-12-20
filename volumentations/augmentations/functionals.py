@@ -4,12 +4,13 @@ import scipy.ndimage.interpolation as sci
 import cv2
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage import map_coordinates
+#import SimpleITK as sitk
 from warnings import warn
 
 """
 vol: [H, W, D(, C)]
 
-x, y, z <--> W, H, D
+x, y, z <--> H, W, D
 
 you should give (H, W, D) form shape.
 
@@ -36,23 +37,23 @@ def shift(img, shift, interpolation=1, border_mode='constant', value=0):
 
 
 def crop(img, x1, y1, z1, x2, y2, z2):
-    width, height, depth = img.shape[:3]
+    height, width, depth = img.shape[:3]
     if x2 <= x1 or y2 <= y1 or z2 <= z1:
         raise ValueError
     if x1 < 0 or y1 < 0 or z1 < 0:
         raise ValueError
-    if x2 > width or y2 > height or z2 > depth:
-        img = pad(img, (y2, x2, z2))
+    if x2 > height or y2 > width or z2 > depth:
+        img = pad(img, (x2, y2, z2))
         warn('image size smaller than crop size, pad by default.', UserWarning)
 
-    return img[y1:y2, x1:x2, z1:z2]
+    return img[x1:x2, y1:y2, z1:z2]
 
 
 def get_center_crop_coords(height, width, depth, crop_height, crop_width, crop_depth):
-    y1 = (height - crop_height) // 2
-    y2 = y1 + crop_height
-    x1 = (width - crop_width) // 2
-    x2 = x1 + crop_width
+    x1 = (height - crop_height) // 2
+    x2 = x1 + crop_height
+    y1 = (width - crop_width) // 2
+    y2 = y1 + crop_width
     z1 = (depth - crop_depth) // 2
     z2 = z1 + crop_depth
     return x1, y1, z1, x2, y2, z2
@@ -63,27 +64,27 @@ def center_crop(img, crop_height, crop_width, crop_depth):
     if height < crop_height or width < crop_width or depth < crop_depth:
         raise ValueError
     x1, y1, z1, x2, y2, z2 = get_center_crop_coords(height, width, depth, crop_height, crop_width, crop_depth)
-    img = img[y1:y2, x1:x2, z1:z2]
+    img = img[x1:x2, y1:y2, z1:z2]
     return img
 
 
 def get_random_crop_coords(height, width, depth, crop_height, crop_width, crop_depth, h_start, w_start, d_start):
-    y1 = int((height - crop_height) * h_start)
-    y2 = y1 + crop_height
-    x1 = int((width - crop_width) * w_start)
-    x2 = x1 + crop_width
+    x1 = int((height - crop_height) * h_start)
+    x2 = x1 + crop_height
+    y1 = int((width - crop_width) * w_start)
+    y2 = y1 + crop_width
     z1 = int((depth - crop_depth) * d_start)
     z2 = z1 + crop_depth
     return x1, y1, z1, x2, y2, z2
 
 
 def random_crop(img, crop_height, crop_width, crop_depth, h_start, w_start, d_start):
-    width, height, depth = img.shape[:3]
+    height, width, depth = img.shape[:3]
     if height < crop_height or width < crop_width or depth < crop_depth:
         img = pad(img, (crop_width, crop_height, crop_depth))
         warn('image size smaller than crop size, pad by default.', UserWarning)
     x1, y1, z1, x2, y2, z2 = get_random_crop_coords(height, width, depth, crop_height, crop_width, crop_depth, h_start, w_start, d_start)
-    img = img[y1:y2, x1:x2, z1:z2]
+    img = img[x1:x2, y1:y2, z1:z2]
     return img
 
 
@@ -97,6 +98,7 @@ def normalize(img, range_norm=True):
     denominator = np.reciprocal(std)
     img = (img - mean) * denominator
     return img
+
 
 def pad(image, new_shape, border_mode="constant", value=0):
     '''
@@ -348,4 +350,3 @@ def scale_coords(coords, scale):
     else:
         coords *= scale
     return coords
-
